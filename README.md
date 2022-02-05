@@ -64,3 +64,8 @@ cargo run
 
    * The terminal support will likely only work on a Unix-like terminal.
      Windows-based shells may have problems.
+     
+## Screenshot
+
+<img width="465" alt="image" src="https://user-images.githubusercontent.com/81832/152639102-9eb78927-a000-4433-b509-eea43ceb0a69.png">
+
