@@ -1,15 +1,18 @@
-use std::thread;
-use std::time;
+use std::{thread, time};
 
 use std::io;
-use std::io::Write;
+use std::io::{Stdout, Write};
 
 use termion;
 use termion::color;
 use termion::input::TermRead;
-use termion::raw::IntoRawMode;
+use termion::raw::{IntoRawMode, RawTerminal};
 
-type MillId = u32;
+// use termion::terminal_size;
+// println!("Size is {:?}", terminal_size().unwrap());
+
+type MillId = usize;
+type Coord = (isize, isize);
 
 struct IdGenerator {
     id: MillId
@@ -18,7 +21,7 @@ struct IdGenerator {
 impl IdGenerator {
     fn new() -> Self {
         Self {
-            id: 1
+            id: 0
         }
     }
 
@@ -28,16 +31,12 @@ impl IdGenerator {
     }
 }
 
-// use termion::raw::RawTerminal;
-// use termion::terminal_size;
-// fn new(stdout: &RawTerminal<Stdout>) -> Self {
-// println!("Size is {:?}", terminal_size().unwrap());
-
 struct TerminalDisplay {
-    view_center_x: i32,
-    view_center_y: i32,
-    view_width: i32,
-    view_height: i32,
+    view_center_x: isize,
+    view_center_y: isize,
+    view_width: usize,
+    view_height: usize,
+    log_lines_displayed: usize,
 }
 
 impl TerminalDisplay {
@@ -45,14 +44,26 @@ impl TerminalDisplay {
         Self {
             view_center_x: 10,
             view_center_y: 5,
-            view_width: 40,
-            view_height: 20,
+            view_width: 68,
+            view_height: 30,
+            log_lines_displayed: 12,
         }
-        // TODO: add support for current center of viewport
     }
 
-    fn dump_world(&self, world: &World) -> () {
+    fn dump_world(&self, world: &World, stdout: &mut RawTerminal<Stdout>) -> () {
         let p = &world.physics;
+
+        write!(
+            stdout,
+            "{}{}{}",
+            termion::clear::All,
+            termion::cursor::Hide,
+            termion::cursor::Goto(1,1)
+        )
+        .unwrap();
+        stdout.lock().flush().unwrap();
+
+        // Render the header
         println!("{}Playmill{} - {}A Simple Factory Simulator in Rust{}\r",
             color::Fg(color::LightRed),
             color::Fg(color::Reset),
@@ -60,39 +71,104 @@ impl TerminalDisplay {
             color::Fg(color::Reset)
         );
         println!("\r");
+
+        // Render the info readout
         print!("[tick {:0>6} {}ms]", p.tick_count, p.tick_post_sleep_ms);
         print!(" [position {},{} | view {}x{}]", self.view_center_x, self.view_center_y, self.view_width, self.view_height);
         println!(" [world {}..{}/{}..{}]\r", p.min_x, p.max_x, p.min_y, p.max_y);
+
+        // Render the controls
         println!("Controls: space to pause, q to exit\r");
         println!("\r");
 
-        for building in world.buildings.iter() {
-            println!("Building id={:?} display_character={:?}\r", building.id, building.display_character);
+        // Render an outer box
+        // TODO: replace whenever
+        for _ in 1..(self.view_width+2) { print!("-"); }
+        println!("\r");
+        for _ in 1..(self.view_height) {
+            print!("|");
+            for _ in 1..(self.view_width) { print!(" "); }
+            println!("|\r");
         }
+        for _ in 1..(self.view_width+2) { print!("-"); }
+        println!("\r");
+
+        // Calculate box offsets for later
+        let _viewport_offset_x = 1;
+        let viewport_offset_y = 5 + 2 + 1;
+
+        // TODO: Incorporate viewport and offsets into calculations
+
+        // Put a bang at 10,10
+        write!(stdout, "{}{}", termion::cursor::Goto(10,10), '!').unwrap();
+
+        // Render each of the buildings
+        for building in world.buildings.iter() {
+            let (x, y) = building.coord;
+        //     x = x +
+            let token = building.display_character();
+            write!(stdout, "{}{}", termion::cursor::Goto(x as u16,y as u16), token).unwrap();
+        }
+
+        // Render the building debug bar
+        let debug_row = (viewport_offset_y + self.view_height) as u16;
+        write!(stdout, "{}", termion::cursor::Goto(1,debug_row)).unwrap();
+        for line in world.log.iter().rev().take(self.log_lines_displayed) {
+            println!("{}\r", line);
+        }
+
+        stdout.lock().flush().unwrap();
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+enum BuildingLabel {
+    Conveyor
+}
+
+type ResourceCount = usize;
+
+#[derive(Debug)]
 struct Building {
-    id: MillId,
-    display_character: char,
+    _id: MillId,
+    label: BuildingLabel,
+    coord: Coord,
+    contains_count: ResourceCount,
+}
+
+// For now, buildings have one x/y coordinate and take up that cell and only that cell
+
+fn building_character(label: BuildingLabel) -> char {
+    return match label {
+        BuildingLabel::Conveyor => ':',
+    }
 }
 
 impl Building {
-    fn new(id: MillId) -> Self {
+    fn new(id: MillId, label: BuildingLabel, coord: Coord, count: ResourceCount) -> Self {
         Self {
-            id: id,
-            display_character: '@',
+            _id: id,
+            label: label,
+            coord: coord,
+            contains_count: count,
         }
+    }
+
+    fn display_character(&self) -> char {
+        if self.contains_count > 0 {
+            return '@';
+        }
+        return building_character(self.label);
     }
 }
 
 struct Physics {
     tick_count: u128,
-    ticks_max: u32,
-    min_x: i32,
-    max_x: i32,
-    min_y: i32,
-    max_y: i32,
+    ticks_max: usize,
+    min_x: isize,
+    max_x: isize,
+    min_y: isize,
+    max_y: isize,
     tick_post_sleep_ms: u64,
 }
 
@@ -117,39 +193,66 @@ impl Physics {
         thread::sleep(time::Duration::from_millis(self.tick_post_sleep_ms));
     }
 
+    // TODO: incorporate before/after snapshot
 }
 
 struct World {
     idgen: IdGenerator,
     physics: Physics,
-    buildings: Vec<Building>
+    buildings: Vec<Building>,
+    log: Vec<String>,
 }
 
 impl World {
     fn new() -> Self {
-        Self {
+        let mut me = Self {
             idgen: IdGenerator::new(),
             physics: Physics::new(),
-            buildings: Vec::new()
-        }
+            buildings: Vec::new(),
+            log: Vec::new(),
+        };
+        me.add_log_line("World initialized");
+        return me;
     }
 
-    fn add_building(&mut self, building: Building) {
-        self.buildings.push(building);
-    }
-
-    fn new_building(&mut self) -> Building {
+    fn add_new_building(&mut self, label: BuildingLabel, coord: Coord, count: ResourceCount) -> MillId {
         let bid = self.idgen.gimme();
-        return Building::new(bid);
+        let log_line = format!("Added building #{} {:?} \"{}\" {:?} w/{}", bid, label, building_character(label), coord, count);
+        let building = Building::new(bid, label, coord, count);
+        self.buildings.push(building);
+        self.add_log_line(&log_line);
+        return bid;
     }
 
     fn tick_world(&mut self) -> () {
         self.physics.tick_physics();
+        if self.physics.tick_count % 50 == 0 {
+            let log_line = format!("Reached tick {}", self.physics.tick_count);
+            self.add_log_line(&log_line);
+        }
+
+        for _building in self.buildings.iter() {
+            // self.physics
+        }
     }
 
     fn tick_sleep(&mut self) -> () {
         self.physics.tick_sleep();
     }
+
+    fn add_log_line(&mut self, line: &str) -> () {
+        self.log.push(line.to_string());
+    }
+}
+
+fn scenario_4x_conveyor(world: &mut World) -> () {
+    let _bid1 = world.add_new_building(BuildingLabel::Conveyor, (18,12), 0);
+    let _bid2 = world.add_new_building(BuildingLabel::Conveyor, (19,12), 1);
+    // TODO: connect bid1 to bid2
+    world.add_new_building(BuildingLabel::Conveyor, (20,12), 0);
+    world.add_new_building(BuildingLabel::Conveyor, (21,12), 0);
+    world.add_new_building(BuildingLabel::Conveyor, (21,11), 0);
+    world.add_new_building(BuildingLabel::Conveyor, (21,10), 0);
 }
 
 fn main() {
@@ -158,35 +261,26 @@ fn main() {
 
     let mut display = TerminalDisplay::new();
     let mut world = World::new();
-    let building = world.new_building();
-    world.add_building(building);
-    let building = Building::new(99);
-    world.add_building(building);
+
+    scenario_4x_conveyor(&mut world);
 
     // for each loop:
+    // tick: evolve the world
     // clear the screen
+    // display the current world
+    // sleep before next tick
     // exit automatically after world.ticks_max ticks
     // exit if user presses the "q" key
     // pause/unpause if user presses the space key
-    // display the current world
 
     let mut loops = 0;
     let mut running = true;
     loop {
-        write!(
-            stdout,
-            "{}{}{}",
-            termion::clear::All,
-            termion::cursor::Hide,
-            termion::cursor::Goto(1,1)
-        )
-        .unwrap();
-        stdout.lock().flush().unwrap();
-
-        display.dump_world(&world);
         if running {
+            loops = loops + 1;
             world.tick_world();
         }
+
         let input = stdin.next();
 
         if let Some(Ok(key)) = input {
@@ -199,11 +293,12 @@ fn main() {
                 }
             }
         }
-        world.tick_sleep();
+
+        display.dump_world(&world, &mut stdout);
         display = display;
-        if running {
-            loops = loops + 1;
-        }
+
+        world.tick_sleep();
+
         if loops >= world.physics.ticks_max {
             break;
         }
