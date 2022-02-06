@@ -99,15 +99,11 @@ impl TerminalDisplay {
 
         // TODO: Incorporate viewport and offsets into calculations
 
-        // Put a bang at 10,10
-        write!(stdout, "{}{}", termion::cursor::Goto(10,10), '!').unwrap();
-
         // Render each of the buildings
         for building in world.buildings.iter() {
             let (x, y) = building.coord;
-        //     x = x +
             let token = building.display_character();
-            write!(stdout, "{}{}", termion::cursor::Goto(x as u16,y as u16), token).unwrap();
+            write!(stdout, "{}{}", termion::cursor::Goto(x as u16, y as u16), token).unwrap();
         }
 
         // Render the building debug bar
@@ -121,44 +117,54 @@ impl TerminalDisplay {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 enum BuildingLabel {
-    Conveyor
+    Conveyor,
+    Creator,
 }
 
 type ResourceCount = usize;
 
 #[derive(Debug)]
 struct Building {
-    _id: MillId,
+    id: MillId,
     label: BuildingLabel,
     coord: Coord,
     contains_count: ResourceCount,
+    contains_max: ResourceCount,
 }
 
-// For now, buildings have one x/y coordinate and take up that cell and only that cell
+// For now, buildings have one x/y coordinate and take up all of that cell and only that cell
 
-fn building_character(label: BuildingLabel) -> char {
+fn building_character_default(label: BuildingLabel) -> char {
     return match label {
         BuildingLabel::Conveyor => ':',
+        BuildingLabel::Creator => '-',
     }
 }
 
 impl Building {
     fn new(id: MillId, label: BuildingLabel, coord: Coord, count: ResourceCount) -> Self {
         Self {
-            _id: id,
+            id: id,
             label: label,
             coord: coord,
             contains_count: count,
+            contains_max: 8,
         }
     }
 
     fn display_character(&self) -> char {
+        if self.label == BuildingLabel::Creator {
+            return match self.contains_count {
+                n @ 0 ..= 8 => (48 + n as u8) as char,
+                _ => '9'
+            }
+        }
         if self.contains_count > 0 {
             return '@';
         }
-        return building_character(self.label);
+        return building_character_default(self.label);
     }
 }
 
@@ -176,7 +182,7 @@ impl Physics {
     fn new() -> Self {
         Self {
             tick_count: 0,
-            ticks_max: 10000,
+            ticks_max: 2000,
             tick_post_sleep_ms: 150,
             min_x: -100,
             max_x: 100,
@@ -217,7 +223,7 @@ impl World {
 
     fn add_new_building(&mut self, label: BuildingLabel, coord: Coord, count: ResourceCount) -> MillId {
         let bid = self.idgen.gimme();
-        let log_line = format!("Added building #{} {:?} \"{}\" {:?} w/{}", bid, label, building_character(label), coord, count);
+        let log_line = format!("Added building #{} {:?} \"{}\" {:?} w/{} item{}", bid, label, building_character_default(label), coord, count, if count == 1 { ' ' } else { 's' });
         let building = Building::new(bid, label, coord, count);
         self.buildings.push(building);
         self.add_log_line(&log_line);
@@ -231,8 +237,18 @@ impl World {
             self.add_log_line(&log_line);
         }
 
-        for _building in self.buildings.iter() {
-            // self.physics
+        // TODO: move or modularize
+        for building in self.buildings.iter_mut() {
+            if building.label == BuildingLabel::Creator {
+                if self.physics.tick_count % 25 == 0 {
+                    if building.contains_count != building.contains_max {
+                        building.contains_count += 1;
+                        let log_line = format!("Incremented resource in building #{} to {}", building.id, building.contains_count);
+                        self.log.push(log_line);
+                        // self.add_log_line(&log_line); # nope, can't borrow mut twice
+                    }
+                }
+            }
         }
     }
 
@@ -253,6 +269,10 @@ fn scenario_4x_conveyor(world: &mut World) -> () {
     world.add_new_building(BuildingLabel::Conveyor, (21,12), 0);
     world.add_new_building(BuildingLabel::Conveyor, (21,11), 0);
     world.add_new_building(BuildingLabel::Conveyor, (21,10), 0);
+    world.add_new_building(BuildingLabel::Creator, (25,20), 0);
+    world.add_new_building(BuildingLabel::Conveyor, (25,21), 0);
+    world.add_new_building(BuildingLabel::Conveyor, (25,22), 0);
+    world.add_new_building(BuildingLabel::Conveyor, (25,23), 0);
 }
 
 fn main() {

@@ -1,6 +1,13 @@
 [package]
 name = "playmill"
+description = "Playmill implements a simple factory-game simulation in Rust"
 version = "1.0.0"
+license = "MIT"
+
+authors = ["Jared Rhine <jared@wordzoo.com>"]
+repository = "https://github.com/jaredrhine/playmill"
+readme = "README.md"
+
 edition = "2021"
 
 [dependencies]

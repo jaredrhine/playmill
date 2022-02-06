@@ -28,6 +28,7 @@ Future directions:
 * More idiomatic Rust code
 * Split into multiple files
 * Tests
+* Make the post-tick sleep adjust based on how long the tick took to ran, to stablize run speed
 * A new building that can combine two kinds of resources to make a new kind
 
 ## Using Playmill
