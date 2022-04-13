@@ -238,14 +238,19 @@ impl World {
         }
 
         // TODO: move or modularize
-        for building in self.buildings.iter_mut() {
-            if building.label == BuildingLabel::Creator {
+        for i in 0..self.buildings.len() {
+            let building = &self.buildings[i];
+            let label = building.label;
+            if label == BuildingLabel::Creator {
                 if self.physics.tick_count % 25 == 0 {
-                    if building.contains_count != building.contains_max {
+                    let building = &mut self.buildings[i];
+                    if building.contains_count < building.contains_max {
                         building.contains_count += 1;
                         let log_line = format!("Incremented resource in building #{} to {}", building.id, building.contains_count);
-                        self.log.push(log_line);
-                        // self.add_log_line(&log_line); # nope, can't borrow mut twice
+                        self.add_log_line(&log_line);
+                    } else {
+                        let log_line = format!("Skipped adding resource in building #{} to {} since already at max {}", building.id, building.contains_count, building.contains_max);
+                        self.add_log_line(&log_line);
                     }
                 }
             }
